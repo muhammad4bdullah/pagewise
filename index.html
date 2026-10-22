@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f5f1">
+  <title>Pagewise — your voice-first PDF teacher</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="app-frame">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="Pagewise home">
+        <span class="brand-mark"><span></span><span></span><span></span></span>
+        <span>pagewise</span>
+      </a>
+
+      <button class="new-book-button" id="choosePdfBtn" type="button">
+        <span class="plus">＋</span> Open a PDF
+      </button>
+      <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden>
+
+      <div class="sidebar-label-row">
+        <span class="eyebrow">YOUR STUDY</span>
+        <span class="sidebar-count" id="pageCountBadge">—</span>
+      </div>
+      <div class="book-card" id="bookCard">
+        <span class="book-icon">▤</span>
+        <div class="book-card-copy">
+          <strong id="bookTitle">No PDF open</strong>
+          <small id="bookMeta">Add a book to begin</small>
+        </div>
+      </div>
+
+      <div class="sidebar-label-row outline-heading">
+        <span class="eyebrow">CONTENTS</span>
+        <span class="tiny-muted" id="outlineCaption">Your chapters</span>
+      </div>
+      <nav class="outline-list" id="outlineList" aria-label="PDF chapters">
+        <div class="outline-empty">Your chapters will appear here.</div>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="privacy-note"><span class="privacy-dot"></span><span>PDF stays on this device</span></div>
+        <button class="settings-link" id="settingsBtn" type="button">
+          <span class="settings-icon">⚙</span> Voice & AI settings
+        </button>
+        <div class="version-note">A quiet place to understand more.</div>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="topbar">
+        <div class="breadcrumb"><span>Library</span><span class="crumb-slash">/</span><strong id="topBookTitle">Study room</strong></div>
+        <div class="topbar-actions">
+          <div class="free-pill"><span class="free-dot"></span> Free to use</div>
+          <button class="avatar-button" id="topSettingsBtn" type="button" aria-label="Open settings">A</button>
+        </div>
+      </header>
+
+      <section class="empty-state" id="emptyState">
+        <div class="empty-orbit orbit-one"></div>
+        <div class="empty-orbit orbit-two"></div>
+        <div class="empty-content">
+          <div class="run-notice" id="fileModeNotice" hidden><strong>Start Pagewise from its local server</strong><span>Opening index.html directly can block PDF and AI connections. Double-click <b>start-local.bat</b> in this folder, then use the browser page it opens.</span></div>
+          <div class="hero-kicker"><span class="sparkle">✳</span> YOUR PERSONAL READING TEACHER</div>
+          <h1>Make a PDF feel<br><em>like a conversation.</em></h1>
+          <p>Drop in a book or paper. Pagewise will walk through it with you, explain what matters, and let you jump straight to the chapter you want.</p>
+          <button class="primary-button hero-button" id="heroChooseBtn" type="button"><span>Choose a PDF</span><span class="button-arrow">↗</span></button>
+          <div class="hero-footnote"><span class="lock-icon">⌑</span> Your file is read in your browser. It is never uploaded as a file.</div>
+        </div>
+        <div class="sample-page" aria-hidden="true">
+          <div class="sample-page-top"><span>FIELD NOTES · 04</span><span>01 / 12</span></div>
+          <div class="sample-sun"></div>
+          <div class="sample-label">A SHORT GUIDE TO</div>
+          <div class="sample-title">The art of<br>paying attention</div>
+          <div class="sample-rule"></div>
+          <div class="sample-paragraph"></div><div class="sample-paragraph short"></div>
+          <div class="sample-page-bottom"><span>PAGEWISE READER</span><span>✳</span></div>
+        </div>
+        <div class="hero-bottom-note"><span>01</span> READ AT YOUR OWN PACE <i></i> ASK ANYTHING <i></i> LISTEN AS YOU GO</div>
+      </section>
+
+      <section class="study-room" id="studyRoom" hidden>
+        <div class="study-header">
+          <div class="study-heading">
+            <div class="hero-kicker"><span class="sparkle">✳</span> READING ROOM</div>
+            <h1 id="chapterHeading">Ready when you are.</h1>
+            <p id="progressLine">Choose a chapter or start with the first page.</p>
+          </div>
+          <button class="outline-button" id="teachPdfBtn" type="button"><span class="play-triangle">▶</span><span id="teachPdfLabel">Teach from here</span></button>
+        </div>
+        <div class="reading-progress"><div class="progress-track"><span id="progressBar"></span></div><span id="progressPercent">0%</span></div>
+
+        <div class="study-grid">
+          <section class="reader-card" aria-label="PDF text reader">
+            <div class="reader-topline">
+              <span class="page-label"><span class="page-dot"></span><span id="pageLabel">PAGE 1</span></span>
+              <div class="reader-controls">
+                <button class="icon-button" id="prevPageBtn" type="button" aria-label="Previous page" title="Previous page">←</button>
+                <span class="page-counter" id="pageCounter">1 / 1</span>
+                <button class="icon-button" id="nextPageBtn" type="button" aria-label="Next page" title="Next page">→</button>
+              </div>
+            </div>
+            <div class="reader-page">
+              <div class="page-running-head"><span id="runningBookTitle">YOUR PDF</span><span id="runningPageNumber">1</span></div>
+              <div class="source-copy" id="pageText">Upload a PDF to start reading.</div>
+              <div class="page-running-foot"><span>PAGEWISE READER</span><span>✳</span></div>
+            </div>
+            <div class="reader-footer">
+              <span><span class="local-icon">⌑</span> Reading locally</span>
+              <button class="text-button" id="copyPageBtn" type="button">Copy page text</button>
+            </div>
+          </section>
+
+          <aside class="teacher-card" aria-label="AI teacher">
+            <div class="teacher-head">
+              <div class="teacher-id">
+                <div class="teacher-avatar"><span>✳</span></div>
+                <div><div class="teacher-name">Your teacher <span class="online-dot"></span></div><div class="teacher-subtitle" id="teacherStatus">Ready to explore this page</div></div>
+              </div>
+              <button class="more-button" id="clearChatBtn" type="button" title="Clear conversation and its locally saved memory" aria-label="Clear conversation and its locally saved memory">···</button>
+            </div>
+
+            <div class="chat-stream" id="chatStream" aria-live="polite">
+              <div class="welcome-card" id="welcomeCard">
+                <div class="welcome-icon">✳</div>
+                <strong>Let’s make this make sense.</strong>
+                <p>I can explain a page, unpack a tricky idea, or teach the book one page at a time.</p>
+                <div class="suggestion-row">
+                  <button class="suggestion-chip" data-prompt="Explain this page in simple terms, with an example." type="button">Explain this page</button>
+                  <button class="suggestion-chip" data-prompt="What is the main idea here?" type="button">Main idea</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="voice-bar">
+              <button class="voice-button" id="liveVoiceBtn" type="button"><span class="mic-icon">◖</span><span id="liveVoiceLabel">Talk to your teacher</span></button>
+              <span class="voice-hint" id="voiceHint">Live voice · keep this tab open</span>
+              <span class="live-token-usage" id="liveTokenUsage" role="status" aria-live="polite" title="Waiting for Gemini to report token usage.">Live tokens/min: waiting</span>
+            </div>
+
+            <form class="composer" id="chatForm">
+              <textarea id="chatInput" rows="1" placeholder="Ask about this page…" aria-label="Ask your teacher"></textarea>
+              <button class="send-button" id="sendBtn" type="submit" aria-label="Send message"><span>↑</span></button>
+            </form>
+            <div class="teacher-disclaimer" id="teacherDisclaimer">AI explanations need your own free API key. <button type="button" id="settingsInlineBtn">Set it up</button></div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="settings-dialog" id="settingsDialog">
+    <form method="dialog" class="dialog-close-row"><button class="dialog-close" aria-label="Close settings">×</button></form>
+    <div class="settings-kicker"><span class="sparkle">✳</span> A FEW PREFERENCES</div>
+    <h2>Make it sound like you.</h2>
+    <p class="settings-intro">Pagewise reads PDFs on your device. To get AI explanations and a natural voice, connect a Gemini API key. The free tier is optional and has provider limits.</p>
+    <label class="field-label" for="apiKeyInput">Gemini API key</label>
+    <div class="api-key-row"><input id="apiKeyInput" type="password" autocomplete="off" placeholder="Paste your key"><button id="toggleKeyBtn" class="show-key-button" type="button">Show</button></div>
+    <a class="key-link" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Get a key in Google AI Studio ↗</a>
+    <div class="key-test-row"><button id="testKeyBtn" type="button">Test AI connection</button><span id="keyTestStatus">No key tested yet.</span></div>
+    <label class="field-label" for="textModelSelect">Text AI model</label>
+    <select id="textModelSelect" class="voice-select">
+      <option value="gemini-3.8-flash">Gemini 3.8 Flash · current default</option>
+    </select>
+    <div class="key-test-row model-check-row"><button id="checkModelsBtn" type="button">Check model access</button><span id="modelAccessStatus">Not checked. This checks API access, not remaining quota.</span></div>
+    <p class="model-note">Talk to your teacher uses Gemini 3.8 Live for real-time voice. Teach from here and Listen use Gemini Flash TTS. If a text model returns an error, Pagewise tries other models listed for your key and remembers the first one that works. This includes quota errors; if billing is enabled, fallback requests may incur charges. Model access checks do not show remaining quota.</p>
+    <label class="checkbox-row"><input id="rememberKey" type="checkbox"><span>Remember on this browser</span></label>
+    <div class="settings-divider"></div>
+    <label class="field-label" for="voiceSelect">Teacher voice</label>
+    <select id="voiceSelect" class="voice-select"><option value="Kore">Kore · warm and clear</option><option value="Aoede">Aoede · light and thoughtful</option><option value="Charon">Charon · steady and grounded</option><option value="Puck">Puck · bright and lively</option><option value="Leda">Leda · calm and gentle</option><option value="Orus">Orus · low and confident</option></select>
+    <div class="privacy-card"><span>⌑</span><p><strong>Your PDF and chat memory stay in this browser.</strong><br>Recent chat messages are saved locally for each PDF and restored when you open it again. Use the conversation menu to clear that saved chat. When you use AI, nearby page text, a rendered page image, and Live Voice audio are sent to Google. Your key is stored in this browser only.</p></div>
+    <div class="settings-actions"><button class="text-button remove-key" id="removeKeyBtn" type="button">Remove key</button><button class="primary-button save-settings" id="saveSettingsBtn" type="button">Save settings <span>↗</span></button></div>
+    <p class="settings-foot">The app itself is free. Gemini’s free quota has limits and can change; keep billing disabled if you need a hard $0 ceiling.</p>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
