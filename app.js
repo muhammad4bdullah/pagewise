@@ -16,7 +16,7 @@
   const AI_PAGE_CONTEXT_LIMIT = 35000;
   const API_ROOT = 'https://generativelanguage.googleapis.com/v1beta';
   const LIVE_ROOT = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
-  const SYSTEM_INSTRUCTION = 'Your name is Zeemal. When greeting the student or introducing yourself, say exactly: “I’m Zeemal, very intelligent. How can I help you?” Do not repeat this introduction at the start of every reply. You are a warm, patient, encouraging teacher, not a strict examiner. Teach thoroughly and accurately, not as a brief summary. When asked to explain or teach a page, cover each important idea, term, step, and relationship on that page in a clear order; do not skip the difficult parts or reduce the page to a few sentences. Explain what each idea means and why it matters, and give concrete examples, comparisons, or everyday analogies that make it understandable. Distinguish what the PDF says from any example you add, and never invent facts or claim the page says something it does not. Adapt to the student’s questions and understanding. Check understanding gently, without turning every reply into a test. When the student says “continue” or asks to learn more, continue naturally from where you left off, covering material not yet explained without repeating the same explanation or abruptly ending the lesson. If a page is too dense to cover well in one reply, explain it in parts and clearly offer to continue with the next part. Answer only in English. Do not answer in Urdu or any other language, even if the student speaks or writes in another language; understand their question if possible and reply in English. The user may ask you to jump to a chapter, section, or page; use the PDF outline and current page context to help them.';
+  const SYSTEM_INSTRUCTION = 'Your name is Juliet. When greeting the student or introducing yourself, say exactly: “I’m Juliet, very intelligent. How can I help you?” Do not repeat this introduction at the start of every reply. You are a warm, patient, encouraging teacher, not a strict examiner. Teach thoroughly and accurately, not as a brief summary. When asked to explain or teach a page, cover each important idea, term, step, and relationship on that page in a clear order; do not skip the difficult parts or reduce the page to a few sentences. Explain what each idea means and why it matters, and give concrete examples, comparisons, or everyday analogies that make it understandable. Distinguish what the PDF says from any example you add, and never invent facts or claim the page says something it does not. Adapt to the student’s questions and understanding. Check understanding gently, without turning every reply into a test. When the student says “continue” or asks to learn more, continue naturally from where you left off, covering material not yet explained without repeating the same explanation or abruptly ending the lesson. If a page is too dense to cover well in one reply, explain it in parts and clearly offer to continue with the next part. Answer only in English. Do not answer in Urdu or any other language, even if the student speaks or writes in another language; understand their question if possible and reply in English. The user may ask you to jump to a chapter, section, or page; use the PDF outline and current page context to help them.';
   const LIVE_USAGE_WINDOW_MS = 60 * 1000;
 
   const $ = (id) => document.getElementById(id);
@@ -431,6 +431,79 @@
       }
     }
     return { start, end, explicit };
+  }
+
+  function extractDocumentSearchRequest(question) {
+    const text = String(question || '').trim();
+    const explicitSearch = /\b(find|search|look for|locate|where(?:\s+in\s+(?:the\s+)?(?:pdf|book|document))?|which page|which chapter|what page|what chapter|mention(?:ed)?|discuss(?:ed)?)\b/i.test(text);
+    const subjectQuestion = /\b(?:what is|what are|explain|teach me about|tell me about|how does|why does|where does .* (?:discuss|explain|mention|cover))\b/i.test(text);
+    if (!explicitSearch && !subjectQuestion) return null;
+    const query = text
+      .replace(/^(?:please\s+)?(?:can you\s+)?(?:help me\s+)?(?:i\s+(?:want|need)\s+you\s+to\s+)?/i, '')
+      .replace(/\b(?:find|search|look|locate|tell|teach|explain|explains|explained|where|which|what|how|why|page|pages|chapter|chapters|section|sections|part|parts|topic|concept|subject|information|details|about|for|in|on|of|the|a|an|is|are|does|do|this|that|it|discuss|discusses|discussed|talk|talks|mention|mentions|mentioned|cover|covers|covered|me|please|pdf|book|document|include|includes|included|related|related to|located)\b/gi, ' ')
+      .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!getSearchTerms(query).length) return null;
+    return { query, explicit: explicitSearch };
+  }
+
+  function getSearchTerms(query) {
+    const stopWords = new Set(['about', 'above', 'after', 'again', 'also', 'among', 'because', 'been', 'before', 'being', 'between', 'both', 'can', 'carefully', 'chapter', 'could', 'definition', 'document', 'example', 'examples', 'find', 'from', 'function', 'have', 'help', 'here', 'importance', 'into', 'look', 'locate', 'main', 'mean', 'meaning', 'means', 'more', 'most', 'need', 'other', 'over', 'page', 'pdf', 'please', 'purpose', 'same', 'search', 'section', 'should', 'show', 'simple', 'some', 'such', 'tell', 'terms', 'than', 'them', 'then', 'there', 'these', 'they', 'this', 'through', 'to', 'topic', 'under', 'want', 'what', 'when', 'where', 'which', 'while', 'with', 'work', 'works', 'would', 'you', 'your', 'idea']);
+    return Array.from(new Set(String(query || '').toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) || []))
+      .filter((term) => term.length > 1 && !stopWords.has(term));
+  }
+
+  function scoreDocumentPage(query, pageNumber) {
+    const terms = getSearchTerms(query);
+    if (!terms.length) return { score: 0, matchedTerms: 0, coverage: 0 };
+    const text = String(pages[pageNumber - 1] || '').toLowerCase();
+    let low = 0;
+    let high = sections.length - 1;
+    let section = null;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      if (sections[middle].page <= pageNumber) {
+        section = sections[middle];
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    const searchable = text + '\n' + String(section ? section.title : '').toLowerCase();
+    const normalizedQuery = terms.join(' ');
+    const phraseMatch = terms.length > 1 && searchable.includes(normalizedQuery);
+    let score = phraseMatch ? 8 : 0;
+    let matchedTerms = 0;
+    for (const term of terms) {
+      const matches = searchable.match(new RegExp('\\b' + term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g'));
+      if (!matches) continue;
+      matchedTerms += 1;
+      score += Math.min(matches.length, 4) * (term.length > 5 ? 2 : 1);
+    }
+    return { score, matchedTerms, coverage: matchedTerms / terms.length };
+  }
+
+  async function searchDocument(query, onProgress) {
+    const terms = getSearchTerms(query);
+    if (!terms.length || !pages.length) return { page: null, scanned: 0, query };
+    let best = null;
+    const batchSize = AI_PAGE_WINDOW_SIZE;
+    for (let batchStart = 1; batchStart <= pages.length; batchStart += batchSize) {
+      const batchEnd = Math.min(pages.length, batchStart + batchSize - 1);
+      if (onProgress) onProgress(batchStart, batchEnd, pages.length);
+      for (let pageNumber = batchStart; pageNumber <= batchEnd; pageNumber += 1) {
+        const match = scoreDocumentPage(query, pageNumber);
+        const minimumCoverage = terms.length === 1 ? 1 : Math.max(0.4, (terms.length - 1) / terms.length);
+        const minimumScore = terms.length === 1 ? 1 : Math.max(2, terms.length * 0.8);
+        if (match.coverage < minimumCoverage || match.score < minimumScore) continue;
+        if (!best || match.score > best.score || (match.score === best.score && match.coverage > best.coverage)) {
+          best = { page: pageNumber, score: match.score, coverage: match.coverage, matchedTerms: match.matchedTerms };
+        }
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+    return { page: best ? best.page : null, match: best, scanned: pages.length, query };
   }
 
   async function getPageImagePart(pageNumber) {
@@ -1033,8 +1106,51 @@
     el.chatInput.style.height = 'auto';
     const jumped = requestSuggestJump(question);
     createMessage('user', question);
+    const searchRequest = extractDocumentSearchRequest(question);
+    let searchNote = '';
+    if (searchRequest && jumped === null) {
+      const searchCurrentEnd = Math.min(pages.length, currentPage + AI_PAGE_WINDOW_SIZE - 1);
+      const currentMatch = pages.slice(currentPage - 1, searchCurrentEnd).reduce((best, _page, index) => {
+        const match = scoreDocumentPage(searchRequest.query, currentPage + index);
+        return !best || match.score > best.score ? match : best;
+      }, null);
+      const shouldSearchWholeDocument = searchRequest.explicit || !currentMatch || currentMatch.coverage < 1 || currentMatch.score < Math.max(2, getSearchTerms(searchRequest.query).length * 0.8);
+      if (shouldSearchWholeDocument) {
+        setTeacherBusy(true, 'Searching the PDF for “' + searchRequest.query + '”…');
+        let result;
+        try {
+          result = await searchDocument(searchRequest.query, (start, end, total) => {
+            el.teacherStatus.textContent = 'Searching PDF pages ' + start + '–' + end + ' of ' + total + '…';
+          });
+        } catch (error) {
+          console.error('Could not search the PDF for a chat request.', error);
+          const response = 'I could not finish searching the PDF: ' + (error.message || 'an unexpected error occurred') + '. Please try the search again.';
+          const bubble = createMessage('assistant', response);
+          conversation.push({ role: 'user', text: question }, { role: 'assistant', text: response });
+          saveChatMemory();
+          addListenButton(bubble.message, bubble.copy);
+          setTeacherBusy(false);
+          showToast('The PDF search failed. Please try again.');
+          return;
+        }
+        if (result.page === null) {
+          const searchablePages = pages.filter((page) => String(page || '').trim()).length;
+          const response = searchablePages
+            ? 'I searched all ' + result.scanned + ' extracted PDF pages for “' + searchRequest.query + '”, but could not find a reliable match. Try another spelling or a more specific phrase. If this is a scanned PDF, it may need OCR before its text can be searched.'
+            : 'I searched the PDF, but no selectable text was extracted from its pages. This file may need OCR before I can locate “' + searchRequest.query + '”.';
+          const bubble = createMessage('assistant', response);
+          conversation.push({ role: 'user', text: question }, { role: 'assistant', text: response });
+          saveChatMemory();
+          addListenButton(bubble.message, bubble.copy);
+          setTeacherBusy(false);
+          return;
+        }
+        goToPage(result.page);
+        searchNote = '\n\nPDF search note: I scanned all ' + result.scanned + ' extracted pages for “' + searchRequest.query + '”. The strongest text match is PDF location ' + result.page + ' in the section “' + activeSection().title + '”. Start by teaching the student from that located material, and be clear that this is a text match rather than a guaranteed exact semantic match.';
+      }
+    }
     const pageContext = jumped ? 'The student navigated to page ' + jumped + ', which is in ' + activeSection().title + '. Explain that location if asked.' : '';
-    await askAI(question + (pageContext ? '\n\nNavigation context: ' + pageContext : ''), { page: currentPage });
+    await askAI(question + (pageContext ? '\n\nNavigation context: ' + pageContext : '') + searchNote, { page: currentPage });
   }
 
   async function explainCurrent() {
@@ -1171,7 +1287,7 @@
 
   function liveSystemInstruction() {
     const outline = sections.slice(0, 80).map((section) => 'Page ' + section.page + ': ' + section.title).join('\n');
-    return SYSTEM_INSTRUCTION + '\n\nThe student is studying "' + currentFileName + '" (' + pages.length + ' pages). Use the supplied PDF content as your source. You have the current page and following pages below. If asked about a range not included in the supplied pages, call read_pdf_pages to retrieve the requested pages before answering; do not change the visible reader page just to retrieve text. When the student asks you to teach, explain, or walk through a page or concept, do not give a 3-4-line summary: deliver a substantial spoken lesson (normally about 2-4 minutes), covering the important ideas and terms in a logical order, explaining how they connect, and giving at least two concrete examples or analogies when the material allows. Explain enough for the student to understand, not just hear a list of facts. Stay accurate to the PDF, clearly distinguish examples from source material, and do not invent details. Keep ordinary greetings and narrow factual follow-ups conversational and appropriately brief; the longer teaching style applies to requests to learn or understand a topic. When the student says “continue,” continue the lesson with material not yet covered rather than repeating or ending early. Always answer only in English. Do not speak or write in Urdu or any other language, even if the student speaks another language. If the student asks to move to a chapter, section, or page, including the next or previous page, call navigate_to_pdf with the requested location; then teach the selected location. Do not claim to have changed pages unless the navigation tool succeeds.\n\nPDF outline:\n' + (outline || 'No chapter outline was detected.') + '\n\nCurrent location: page ' + currentPage + ', in ' + activeSection().title + '.\nCurrent page and following pages (up to 10 total):\n' + getPagesContext(currentPage, Math.min(pages.length, currentPage + AI_PAGE_WINDOW_SIZE - 1), AI_PAGE_CONTEXT_LIMIT);
+    return SYSTEM_INSTRUCTION + '\n\nThe student is studying "' + currentFileName + '" (' + pages.length + ' pages). Use the supplied PDF content as your source. You have the current page and following pages below. If asked about a range not included in the supplied pages, call read_pdf_pages to retrieve the requested pages before answering; do not change the visible reader page just to retrieve text. If the student asks you to find, locate, or explain a topic, chapter, or concept that is not covered in the supplied pages, call search_pdf_document before answering. This tool searches extracted PDF text in batches across the whole document, navigates to the strongest match, and returns surrounding page context. Never claim a topic was found unless the search tool returns a match; if it finds none, say so clearly and do not invent an answer from the PDF. When the student asks you to teach, explain, or walk through a page or concept, do not give a 3-4-line summary: deliver a substantial spoken lesson (normally about 2-4 minutes), covering the important ideas and terms in a logical order, explaining how they connect, and giving at least two concrete examples or analogies when the material allows. Explain enough for the student to understand, not just hear a list of facts. Stay accurate to the PDF, clearly distinguish examples from source material, and do not invent details. Keep ordinary greetings and narrow factual follow-ups conversational and appropriately brief; the longer teaching style applies to requests to learn or understand a topic. When the student says “continue,” continue the lesson with material not yet covered rather than repeating or ending early. Always answer only in English. Do not speak or write in Urdu or any other language, even if the student speaks another language. If the student asks to move to a chapter, section, or page, including the next or previous page, call navigate_to_pdf with the requested location; then teach the selected location. Do not claim to have changed pages unless the navigation tool succeeds.\n\nPDF outline:\n' + (outline || 'No chapter outline was detected.') + '\n\nCurrent location: page ' + currentPage + ', in ' + activeSection().title + '.\nCurrent page and following pages (up to 10 total):\n' + getPagesContext(currentPage, Math.min(pages.length, currentPage + AI_PAGE_WINDOW_SIZE - 1), AI_PAGE_CONTEXT_LIMIT);
   }
 
   async function startLive() {
@@ -1235,6 +1351,17 @@
                     endPage: { type: 'INTEGER', description: 'Last requested page number; at most 10 pages will be returned' }
                   },
                   required: ['startPage', 'endPage']
+                }
+              },
+              {
+                name: 'search_pdf_document',
+                description: 'Search all extracted PDF pages for a requested topic, chapter title, or phrase. Use when the requested material is outside the supplied context. A successful search navigates the visible reader to the strongest match and returns nearby page context.',
+                parameters: {
+                  type: 'OBJECT',
+                  properties: {
+                    query: { type: 'STRING', description: 'The specific topic, chapter title, concept, or phrase to find in the PDF' }
+                  },
+                  required: ['query']
                 }
               }
             ] }]
@@ -1438,6 +1565,47 @@
   async function handleLiveTools(calls) {
     const responses = [];
     for (const call of calls) {
+      if (call.name === 'search_pdf_document') {
+        const query = String(call.args && call.args.query || '').trim();
+        if (!query) {
+          responses.push({ id: call.id, name: call.name, response: { result: 'Provide a topic, chapter title, concept, or phrase to search for.' } });
+          continue;
+        }
+        try {
+          const result = await searchDocument(query, (start, end, total) => {
+            el.teacherStatus.textContent = 'Searching PDF pages ' + start + '–' + end + ' of ' + total + '…';
+          });
+          if (result.page === null) {
+            const searchablePages = pages.filter((page) => String(page || '').trim()).length;
+            responses.push({
+              id: call.id,
+              name: call.name,
+              response: {
+                result: searchablePages
+                  ? 'Searched all ' + result.scanned + ' extracted pages for "' + query + '" but found no reliable text match. Tell the student that clearly and suggest another spelling or phrase. Do not claim a page was found.'
+                  : 'No selectable text was extracted from this PDF, so the requested topic "' + query + '" could not be searched. Tell the student that OCR may be needed.'
+              }
+            });
+            continue;
+          }
+          goToPage(result.page, false);
+          sendLivePageImage(result.page);
+          liveReplyText = '';
+          liveAssistantBubble = null;
+          const contextEnd = Math.min(pages.length, result.page + AI_PAGE_WINDOW_SIZE - 1);
+          responses.push({
+            id: call.id,
+            name: call.name,
+            response: {
+              result: 'Searched all ' + result.scanned + ' extracted pages for "' + query + '". The strongest text match is PDF location ' + result.page + ', in section "' + activeSection().title + '". This is a text match, not a guaranteed semantic match. The reader is now at that location. Explain the located material, grounded in this context:\n' + getPagesContext(result.page, contextEnd, AI_PAGE_CONTEXT_LIMIT)
+            }
+          });
+        } catch (error) {
+          console.error('Could not search the PDF for a Live Voice request.', error);
+          responses.push({ id: call.id, name: call.name, response: { result: 'The PDF search failed: ' + (error.message || 'unknown error') + '. Tell the student that the search could not be completed.' } });
+        }
+        continue;
+      }
       if (call.name === 'read_pdf_pages') {
         const args = call.args || {};
         const requestedStart = Number(args.startPage ?? args.start_page);
