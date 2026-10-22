@@ -73,6 +73,7 @@
   let liveUsageTimer = 0;
   let liveUsageReports = [];
   let hasLiveUsageData = false;
+  let liveSessionTotalTokens = 0;
 
   function key() {
     return sessionStorage.getItem('pagewise-gemini-key') || localStorage.getItem('pagewise-gemini-key') || '';
@@ -102,8 +103,9 @@
   function clearLiveUsage() {
     liveUsageReports = [];
     hasLiveUsageData = false;
+    liveSessionTotalTokens = 0;
     if (el.liveTokenUsage) {
-      el.liveTokenUsage.textContent = 'Live tokens/min: waiting';
+      el.liveTokenUsage.textContent = 'Live tokens/min: waiting · session total: waiting';
       el.liveTokenUsage.title = 'Waiting for Gemini to report token usage.';
     }
   }
@@ -115,6 +117,7 @@
     if (!Number.isFinite(total) || total <= 0) return;
     const now = Date.now();
     liveUsageReports.push({ timestamp: now, tokens: total, prompt, response });
+    liveSessionTotalTokens += total;
     hasLiveUsageData = true;
     refreshLiveUsage(now);
   }
@@ -123,15 +126,15 @@
     const cutoff = now - LIVE_USAGE_WINDOW_MS;
     liveUsageReports = liveUsageReports.filter((report) => report.timestamp > cutoff);
     if (!hasLiveUsageData) {
-      el.liveTokenUsage.textContent = 'Live tokens/min: waiting';
+      el.liveTokenUsage.textContent = 'Live tokens/min: waiting · session total: waiting';
       el.liveTokenUsage.title = 'Waiting for Gemini to report token usage.';
       return;
     }
     const total = liveUsageReports.reduce((sum, report) => sum + report.tokens, 0);
     const prompt = liveUsageReports.reduce((sum, report) => sum + report.prompt, 0);
     const response = liveUsageReports.reduce((sum, report) => sum + report.response, 0);
-    el.liveTokenUsage.textContent = 'Live tokens/min: ' + total.toLocaleString();
-    el.liveTokenUsage.title = 'Gemini-reported usage in the rolling last 60 seconds. Input: ' + prompt.toLocaleString() + ', output: ' + response.toLocaleString() + '. This is not a quota limit or prediction.';
+    el.liveTokenUsage.textContent = 'Live tokens/min: ' + total.toLocaleString() + ' · session total: ' + liveSessionTotalTokens.toLocaleString();
+    el.liveTokenUsage.title = 'Gemini-reported tokens in the rolling last 60 seconds and across this Live Voice session. Input in last minute: ' + prompt.toLocaleString() + ', output: ' + response.toLocaleString() + '. Values are based only on usage metadata received from Gemini; they are not a quota limit or prediction.';
   }
   function safeText(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
   async function requestTextGeneration(apiKey, payload, consumeResponse, options) {
