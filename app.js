@@ -12,6 +12,8 @@
   const CHAT_STORAGE_PREFIX = 'pagewise-chat-v1:';
   const MAX_SAVED_CHAT_MESSAGES = 80;
   const MAX_SAVED_CHAT_MESSAGE_LENGTH = 5000;
+  const AI_PAGE_WINDOW_SIZE = 10;
+  const AI_PAGE_CONTEXT_LIMIT = 35000;
   const API_ROOT = 'https://generativelanguage.googleapis.com/v1beta';
   const LIVE_ROOT = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const SYSTEM_INSTRUCTION = 'You are Pagewise, a warm, patient, encouraging teacher, not a strict examiner. Teach thoroughly and accurately, not as a brief summary. When asked to explain or teach a page, cover each important idea, term, step, and relationship on that page in a clear order; do not skip the difficult parts or reduce the page to a few sentences. Explain what each idea means and why it matters, and give concrete examples, comparisons, or everyday analogies that make it understandable. Distinguish what the PDF says from any example you add, and never invent facts or claim the page says something it does not. Adapt to the student’s questions and understanding. Check understanding gently, without turning every reply into a test. When the student says “continue” or asks to learn more, continue naturally from where you left off, covering material not yet explained without repeating the same explanation or abruptly ending the lesson. If a page is too dense to cover well in one reply, explain it in parts and clearly offer to continue with the next part. Answer only in English. Do not answer in Urdu or any other language, even if the student speaks or writes in another language; understand their question if possible and reply in English. The user may ask you to jump to a chapter, section, or page; use the PDF outline and current page context to help them.';
@@ -375,7 +377,7 @@
     currentPage = target;
     renderPage();
     if (updateLive !== false && isLive() && liveReady) {
-      sendLiveText('We are now on page ' + currentPage + ' of the PDF. Section: ' + activeSection().title + '. Here is the page text:\n' + getPageContext(currentPage, 7000));
+      sendLiveText('We are now on page ' + currentPage + ' of the PDF. Section: ' + activeSection().title + '. Here is the text of this page and the next pages for reference:\n' + getPagesContext(currentPage, Math.min(pages.length, currentPage + AI_PAGE_WINDOW_SIZE - 1), AI_PAGE_CONTEXT_LIMIT));
       sendLivePageImage(currentPage);
     }
   }
@@ -390,6 +392,45 @@
       if (text) parts.push('[Page ' + (at + 1) + (offset === 0 ? ', current' : '') + ']\n' + text);
     }
     return parts.join('\n\n').slice(0, limit);
+  }
+
+  function getPagesContext(startPage, endPage, limit) {
+    const start = Math.max(1, Math.min(pages.length, Number(startPage) || currentPage));
+    const end = Math.max(start, Math.min(pages.length, Number(endPage) || start));
+    const pageCount = end - start + 1;
+    const perPageLimit = Math.max(1, Math.floor((limit || AI_PAGE_CONTEXT_LIMIT) / pageCount));
+    const parts = [];
+    for (let pageNumber = start; pageNumber <= end; pageNumber += 1) {
+      const text = String(pages[pageNumber - 1] || '').slice(0, perPageLimit);
+      parts.push('[Page ' + pageNumber + (pageNumber === currentPage ? ', current' : '') + ']\n' + (text || '[No selectable text was extracted from this page.]'));
+    }
+    return parts.join('\n\n');
+  }
+
+  function getRequestedPageRange(question, fallbackPage) {
+    const text = String(question || '');
+    const rangeMatch = text.match(/\bpages?\s*(\d{1,5})\s*(?:-|–|—|to|through|thru)\s*(?:pages?\s*)?(\d{1,5})\b/i)
+      || text.match(/\b(\d{1,5})\s*(?:-|–|—|to|through|thru)\s*(\d{1,5})\b/i);
+    const pageMatch = text.match(/\bpage\s+(\d{1,5})\b/i);
+    let start = fallbackPage || currentPage;
+    let end = Math.min(pages.length, start + AI_PAGE_WINDOW_SIZE - 1);
+    let explicit = false;
+    if (rangeMatch) {
+      const first = Number(rangeMatch[1]);
+      const last = Number(rangeMatch[2]);
+      if (first >= 1 && last >= first && first <= pages.length) {
+        start = first;
+        end = Math.min(last, first + AI_PAGE_WINDOW_SIZE - 1, pages.length);
+        explicit = true;
+      }
+    } else if (pageMatch) {
+      const requested = Number(pageMatch[1]);
+      if (requested >= 1 && requested <= pages.length) {
+        start = requested;
+        end = Math.min(pages.length, start + AI_PAGE_WINDOW_SIZE - 1);
+      }
+    }
+    return { start, end, explicit };
   }
 
   async function getPageImagePart(pageNumber) {
@@ -566,17 +607,30 @@
     if (!requireKey()) return null;
     if (!pages.length) { showToast('Open a PDF first so your teacher has something to explain.'); return null; }
     const pageNumber = opts.page || currentPage;
+    const pageRange = getRequestedPageRange(question, pageNumber);
     const sectionData = opts.section ? getSectionContext(pageNumber) : null;
-    const source = sectionData ? sectionData.text : getPageContext(pageNumber, 12000);
-    const sourceLabel = sectionData ? 'Chapter or section: ' + sectionData.title + ' (pages ' + sectionData.start + '–' + sectionData.end + ')' : 'Current section: ' + activeSection().title + ' · current page: ' + pageNumber;
-    const enriched = sourceLabel + '\n\nPDF text for reference:\n' + (source || '[No selectable text on this page.]') + '\n\nStudent request: ' + question;
+    const source = sectionData ? sectionData.text : getPagesContext(pageRange.start, pageRange.end, AI_PAGE_CONTEXT_LIMIT);
+    const sourceLabel = sectionData
+      ? 'Chapter or section: ' + sectionData.title + ' (pages ' + sectionData.start + '–' + sectionData.end + ')'
+      : 'Current section: ' + activeSection().title + ' · reference pages: ' + pageRange.start + '–' + pageRange.end + (pageRange.explicit && Number(question.match(/\bpages?\s*(\d{1,5})\s*(?:-|–|—|to|through|thru)\s*(?:pages?\s*)?(\d{1,5})\b/i)?.[2]) > pageRange.end ? ' (limited to 10 pages)' : '');
+    const enriched = sourceLabel + '\n\nPDF text for reference:\n' + (source || '[No selectable text was extracted from the requested pages.]') + '\n\nUse the page labels to distinguish the source text. When the student asks about a page range, compare and explain all requested pages represented below, not just the currently open page. For an explicitly requested range, the following page images, if any, are in ascending page order starting with page ' + pageRange.start + '. Clearly say if any requested page has no extracted text.\n\nStudent request: ' + question;
     const history = conversation.slice(-8).map((entry) => ({ role: entry.role === 'assistant' ? 'model' : 'user', parts: [{ text: entry.text }] }));
     setTeacherBusy(true, 'Preparing the page for your teacher…');
     const bubble = createMessage('assistant', '', { streaming: true, meta: sectionData ? 'TEACHING ' + sectionData.title.toUpperCase() : 'PAGE ' + String(pageNumber).padStart(2, '0') });
     let currentPageImage = null;
-    try { currentPageImage = await getPageImagePart(pageNumber); } catch (_) { /* Text explanation still works if rendering fails. */ }
+    try { currentPageImage = await getPageImagePart(pageRange.start); } catch (_) { /* Text explanation still works if rendering fails. */ }
     const userParts = [{ text: enriched }];
     if (currentPageImage) userParts.push(currentPageImage);
+    if (pageRange.explicit && pageRange.end > pageRange.start) {
+      for (let imagePage = pageRange.start + 1; imagePage <= pageRange.end; imagePage += 1) {
+        try {
+          const image = await getPageImagePart(imagePage);
+          if (image) userParts.push(image);
+        } catch (error) {
+          console.warn('Could not render requested PDF page ' + imagePage + '; its extracted text remains available.', error);
+        }
+      }
+    }
     const contents = history.concat([{ role: 'user', parts: userParts }]);
     setTeacherBusy(true, 'Thinking through the page…');
     try {
@@ -1117,7 +1171,7 @@
 
   function liveSystemInstruction() {
     const outline = sections.slice(0, 80).map((section) => 'Page ' + section.page + ': ' + section.title).join('\n');
-    return SYSTEM_INSTRUCTION + '\n\nThe student is studying "' + currentFileName + '" (' + pages.length + ' pages). Use the supplied PDF content as your source. When the student asks you to teach, explain, or walk through a page or concept, do not give a 3-4-line summary: deliver a substantial spoken lesson (normally about 2-4 minutes), covering the important ideas and terms in a logical order, explaining how they connect, and giving at least two concrete examples or analogies when the material allows. Explain enough for the student to understand, not just hear a list of facts. Stay accurate to the PDF, clearly distinguish examples from source material, and do not invent details. Keep ordinary greetings and narrow factual follow-ups conversational and appropriately brief; the longer teaching style applies to requests to learn or understand a topic. When the student says “continue,” continue the lesson with material not yet covered rather than repeating or ending early. Always answer only in English. Do not speak or write in Urdu or any other language, even if the student speaks another language. If the student asks to move to a chapter, section, or page, including the next or previous page, call navigate_to_pdf with the requested location; then teach the selected location. Do not claim to have changed pages unless the navigation tool succeeds.\n\nPDF outline:\n' + (outline || 'No chapter outline was detected.') + '\n\nCurrent location: page ' + currentPage + ', in ' + activeSection().title + '.\nCurrent page text:\n' + getPageContext(currentPage, 8500);
+    return SYSTEM_INSTRUCTION + '\n\nThe student is studying "' + currentFileName + '" (' + pages.length + ' pages). Use the supplied PDF content as your source. You have the current page and following pages below. If asked about a range not included in the supplied pages, call read_pdf_pages to retrieve the requested pages before answering; do not change the visible reader page just to retrieve text. When the student asks you to teach, explain, or walk through a page or concept, do not give a 3-4-line summary: deliver a substantial spoken lesson (normally about 2-4 minutes), covering the important ideas and terms in a logical order, explaining how they connect, and giving at least two concrete examples or analogies when the material allows. Explain enough for the student to understand, not just hear a list of facts. Stay accurate to the PDF, clearly distinguish examples from source material, and do not invent details. Keep ordinary greetings and narrow factual follow-ups conversational and appropriately brief; the longer teaching style applies to requests to learn or understand a topic. When the student says “continue,” continue the lesson with material not yet covered rather than repeating or ending early. Always answer only in English. Do not speak or write in Urdu or any other language, even if the student speaks another language. If the student asks to move to a chapter, section, or page, including the next or previous page, call navigate_to_pdf with the requested location; then teach the selected location. Do not claim to have changed pages unless the navigation tool succeeds.\n\nPDF outline:\n' + (outline || 'No chapter outline was detected.') + '\n\nCurrent location: page ' + currentPage + ', in ' + activeSection().title + '.\nCurrent page and following pages (up to 10 total):\n' + getPagesContext(currentPage, Math.min(pages.length, currentPage + AI_PAGE_WINDOW_SIZE - 1), AI_PAGE_CONTEXT_LIMIT);
   }
 
   async function startLive() {
@@ -1165,11 +1219,25 @@
             systemInstruction: { parts: [{ text: liveSystemInstruction() }] },
             inputAudioTranscription: {},
             outputAudioTranscription: {},
-            tools: [{ functionDeclarations: [{
-              name: 'navigate_to_pdf',
-              description: 'Move the student to a named chapter, section, or numbered page, or to the next, previous, first, or last page when requested.',
-              parameters: { type: 'OBJECT', properties: { target: { type: 'STRING', description: 'The requested destination, for example next page, previous page, page 12, or chapter 3' } }, required: ['target'] }
-            }] }]
+            tools: [{ functionDeclarations: [
+              {
+                name: 'navigate_to_pdf',
+                description: 'Move the student to a named chapter, section, or numbered page, or to the next, previous, first, or last page when requested.',
+                parameters: { type: 'OBJECT', properties: { target: { type: 'STRING', description: 'The requested destination, for example next page, previous page, page 12, or chapter 3' } }, required: ['target'] }
+              },
+              {
+                name: 'read_pdf_pages',
+                description: 'Retrieve text from a requested range of PDF pages without changing the visible reader page. Use this when the student asks about a range not included in the provided page context.',
+                parameters: {
+                  type: 'OBJECT',
+                  properties: {
+                    startPage: { type: 'INTEGER', description: 'First requested page number' },
+                    endPage: { type: 'INTEGER', description: 'Last requested page number; at most 10 pages will be returned' }
+                  },
+                  required: ['startPage', 'endPage']
+                }
+              }
+            ] }]
           } }));
         } catch (error) {
           closeLive(false);
@@ -1231,6 +1299,7 @@
       el.voiceHint.textContent = 'Listening · keep this tab open';
       el.teacherStatus.textContent = 'Listening to your question…';
       startMicrophoneStream();
+      sendLiveText('For reference, the currently open page and following pages are available here:\n' + getPagesContext(currentPage, Math.min(pages.length, currentPage + AI_PAGE_WINDOW_SIZE - 1), AI_PAGE_CONTEXT_LIMIT));
       sendLivePageImage(currentPage);
       return;
     }
@@ -1369,6 +1438,18 @@
   async function handleLiveTools(calls) {
     const responses = [];
     for (const call of calls) {
+      if (call.name === 'read_pdf_pages') {
+        const args = call.args || {};
+        const requestedStart = Number(args.startPage ?? args.start_page);
+        const requestedEnd = Number(args.endPage ?? args.end_page);
+        if (!Number.isInteger(requestedStart) || !Number.isInteger(requestedEnd) || requestedStart < 1 || requestedEnd < requestedStart || requestedStart > pages.length) {
+          responses.push({ id: call.id, name: call.name, response: { result: 'Invalid page range. Provide startPage and endPage from 1 to ' + pages.length + '.' } });
+          continue;
+        }
+        const end = Math.min(requestedEnd, requestedStart + AI_PAGE_WINDOW_SIZE - 1, pages.length);
+        responses.push({ id: call.id, name: call.name, response: { result: 'PDF text for pages ' + requestedStart + '–' + end + ':\n' + getPagesContext(requestedStart, end, AI_PAGE_CONTEXT_LIMIT) } });
+        continue;
+      }
       if (call.name !== 'navigate_to_pdf') continue;
       const target = call.args && call.args.target ? call.args.target : '';
       const page = findTargetPage(target, currentPage);
@@ -1377,7 +1458,7 @@
         sendLivePageImage(page);
         liveReplyText = '';
         liveAssistantBubble = null;
-        responses.push({ id: call.id, name: call.name, response: { result: 'Navigated to page ' + page + ', section ' + activeSection().title + '. Page text follows:\n' + getPageContext(page, 9000) } });
+        responses.push({ id: call.id, name: call.name, response: { result: 'Navigated to page ' + page + ', section ' + activeSection().title + '. Text for this page and following pages:\n' + getPagesContext(page, Math.min(pages.length, page + AI_PAGE_WINDOW_SIZE - 1), AI_PAGE_CONTEXT_LIMIT) } });
       } else {
         responses.push({ id: call.id, name: call.name, response: { result: 'I could not find that location in the outline. Available chapter names: ' + sections.map((section) => section.title).join('; ') } });
       }
