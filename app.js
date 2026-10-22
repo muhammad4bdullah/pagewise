@@ -19,7 +19,7 @@
 
   const $ = (id) => document.getElementById(id);
   const el = {
-    fileInput: $('fileInput'), choosePdfBtn: $('choosePdfBtn'), heroChooseBtn: $('heroChooseBtn'),
+    fileInput: $('fileInput'), choosePdfBtn: $('choosePdfBtn'), heroChooseBtn: $('heroChooseBtn'), samplePdfBtn: $('samplePdfBtn'),
     emptyState: $('emptyState'), studyRoom: $('studyRoom'), bookTitle: $('bookTitle'),
     bookMeta: $('bookMeta'), topBookTitle: $('topBookTitle'), pageCountBadge: $('pageCountBadge'),
     outlineList: $('outlineList'), outlineCaption: $('outlineCaption'), chapterHeading: $('chapterHeading'),
@@ -1417,6 +1417,20 @@
 
   el.choosePdfBtn.addEventListener('click', () => el.fileInput.click());
   el.heroChooseBtn.addEventListener('click', () => el.fileInput.click());
+  el.samplePdfBtn.addEventListener('click', async () => {
+    el.samplePdfBtn.disabled = true;
+    try {
+      const response = await fetch(new URL('assets/pasted_text_transcript.pdf', document.baseURI));
+      if (!response.ok) throw new Error('The sample PDF could not be downloaded (HTTP ' + response.status + ').');
+      const sample = new File([await response.blob()], 'pasted_text_transcript.pdf', { type: 'application/pdf' });
+      await loadPdf(sample);
+    } catch (error) {
+      console.error('Could not load the included OCR sample book.', error);
+      showToast(error.message || 'Could not load the OCR sample book. Check your connection and try again.');
+    } finally {
+      el.samplePdfBtn.disabled = false;
+    }
+  });
   el.fileInput.addEventListener('change', (event) => { if (event.target.files && event.target.files[0]) loadPdf(event.target.files[0]); event.target.value = ''; });
   el.prevPageBtn.addEventListener('click', () => goToPage(currentPage - 1));
   el.nextPageBtn.addEventListener('click', () => goToPage(currentPage + 1));

@@ -30,8 +30,9 @@ jobs:
         uses: actions/configure-pages@v5
       - name: Prepare static site
         run: |
-          mkdir _site
+          mkdir -p _site/assets
           cp index.html app.js styles.css _site/
+          cp assets/pasted_text_transcript.pdf _site/assets/
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
